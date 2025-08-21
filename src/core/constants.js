@@ -1,7 +1,3 @@
-/**
- * Configuration constants with environment variable support
- */
-
 // Helper functions
 const getIntFromEnv = (envKey, defaultValue) => {
     const value = process.env[envKey];
@@ -20,11 +16,10 @@ const getBoolFromEnv = (envKey, defaultValue) => {
 export const MAX_RETRIES = getIntFromEnv('MAX_RETRIES', 20);
 export const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com';
 export const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1beta';
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
 export const GEMINI_GENERATE_CONTENT_ENDPOINT = 'generateContent';
 
 // Logging Configuration
-// Supported log levels: none, error, warn, info, debug
 export const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 export const LOG_PERFORMANCE_METRICS = getBoolFromEnv('LOG_PERFORMANCE_METRICS', false);
 
@@ -37,7 +32,9 @@ export const HTTP_STATUS = {
     FORBIDDEN: 403,
     NOT_FOUND: 404,
     METHOD_NOT_ALLOWED: 405,
-    INTERNAL_SERVER_ERROR: 500
+    TOO_MANY_REQUESTS: 429,
+    INTERNAL_SERVER_ERROR: 500,
+    SERVICE_UNAVAILABLE: 503
 };
 
 // HTTP methods
@@ -60,7 +57,8 @@ export const HEADERS = {
     AUTHORIZATION: 'authorization',
     X_GOOG_API_KEY: 'x-goog-api-key',
     CACHE_CONTROL: 'Cache-Control',
-    X_CACHE_STATUS: 'X-Cache-Status'
+    X_CACHE_STATUS: 'X-Cache-Status',
+    X_REQUEST_ID: 'X-Request-ID'
 };
 
 // Auth patterns
@@ -75,7 +73,9 @@ export const ERROR_MESSAGES = {
     AUTH_REQUIRED: 'Authentication required',
     UNAUTHORIZED: 'The provided key is not authorized to use this service',
     NOT_FOUND: 'Endpoint not found',
-    METHOD_NOT_ALLOWED: 'Method not allowed'
+    METHOD_NOT_ALLOWED: 'Method not allowed',
+    TOO_MANY_REQUESTS: 'Too many requests',
+    SERVICE_UNAVAILABLE: 'Service temporarily unavailable'
 };
 
 // Translation configuration
@@ -87,10 +87,11 @@ export const API_KEY_LOG_LENGTH = 7;
 
 // Cache configuration
 export const CACHE = {
-    DURATION: getIntFromEnv('CACHE_DURATION_SECONDS', 600) * 1000, // 10 minutes default
-    TRANSLATION_TTL: getIntFromEnv('TRANSLATION_CACHE_TTL', 86400), // 24 hours default
+    DURATION: getIntFromEnv('CACHE_DURATION_SECONDS', 600) * 1000,
+    TRANSLATION_TTL: getIntFromEnv('TRANSLATION_CACHE_TTL', 86400),
     INITIAL_VALUE: null,
-    INITIAL_TIMESTAMP: 0
+    INITIAL_TIMESTAMP: 0,
+    KEY_CACHE_SIZE: getIntFromEnv('KEY_CACHE_SIZE', 1000)
 };
 
 // Redis key constants 
@@ -111,6 +112,8 @@ export const ENV_VARS = {
 
 // Performance configuration 
 export const PERFORMANCE = {
-    REQUEST_TIMEOUT: getIntFromEnv('REQUEST_TIMEOUT_MS', 20000), // 20 seconds default
-    PARALLEL_TRANSLATION_LIMIT: getIntFromEnv('PARALLEL_TRANSLATION_LIMIT', 10) // Max parallel translations
+    REQUEST_TIMEOUT: getIntFromEnv('REQUEST_TIMEOUT_MS', 20000),
+    PARALLEL_TRANSLATION_LIMIT: getIntFromEnv('PARALLEL_TRANSLATION_LIMIT', 10),
+    BATCH_DELAY: getIntFromEnv('BATCH_DELAY_MS', 50),
+    REQUEST_DEDUP_TTL: getIntFromEnv('REQUEST_DEDUP_TTL_MS', 100)
 };

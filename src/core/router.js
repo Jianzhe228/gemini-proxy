@@ -19,7 +19,13 @@ class Router {
 
         // Root route
         this.addRoute('/', {
-            [HTTP_METHOD.GET]: this.handleRoot
+            [HTTP_METHOD.GET]: this.handleRoot,
+            [HTTP_METHOD.HEAD]: this.handleRoot
+        });
+
+        // Health check
+        this.addRoute('/health', {
+            [HTTP_METHOD.GET]: this.handleHealth
         });
 
         // Favicon
@@ -87,16 +93,36 @@ class Router {
             status: 'ok',
             service: 'Translation API',
             version: 'v1',
-            endpoint: '/translate/:authKey'
+            endpoint: '/translate/:authKey',
+            timestamp: new Date().toISOString()
         }), {
             status: HTTP_STATUS.OK,
-            headers: { [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON }
+            headers: { 
+                [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON,
+                [HEADERS.CACHE_CONTROL]: 'public, max-age=3600'
+            }
+        });
+    };
+
+    handleHealth = () => {
+        return new Response(JSON.stringify({
+            status: 'healthy',
+            timestamp: new Date().toISOString()
+        }), {
+            status: HTTP_STATUS.OK,
+            headers: { 
+                [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON,
+                [HEADERS.CACHE_CONTROL]: 'no-cache'
+            }
         });
     };
 
     handleFavicon = () => {
         return new Response(null, {
-            status: HTTP_STATUS.NO_CONTENT
+            status: HTTP_STATUS.NO_CONTENT,
+            headers: {
+                [HEADERS.CACHE_CONTROL]: 'public, max-age=86400'
+            }
         });
     };
 
@@ -106,7 +132,8 @@ class Router {
             headers: {
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-goog-api-key'
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-goog-api-key',
+                'Access-Control-Max-Age': '86400'
             }
         });
     };

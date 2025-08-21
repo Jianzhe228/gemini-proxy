@@ -9,295 +9,220 @@ import { Logger } from '../utils/logger.js';
 
 const logger = new Logger('ApiKeyManager');
 
-// Cache variables
-let cachedApiKeys = CACHE.INITIAL_VALUE;
-let cachedTranslateKeys = CACHE.INITIAL_VALUE;
-let cachedAuthSecrets = CACHE.INITIAL_VALUE;
-let apiKeyCacheTimestamp = CACHE.INITIAL_TIMESTAMP;
-let translateKeyCacheTimestamp = CACHE.INITIAL_TIMESTAMP;
-let authSecretsCacheTimestamp = CACHE.INITIAL_TIMESTAMP;
-
-// Loading locks to prevent thundering herd
-let apiKeysLoadingPromise = null;
-let translateKeysLoadingPromise = null;
-let authSecretsLoadingPromise = null;
-
-let redis;
-if (process.env[ENV_VARS.KV_REST_API_URL] && process.env[ENV_VARS.KV_REST_API_TOKEN]) {
-  redis = new Redis({
-    url: process.env[ENV_VARS.KV_REST_API_URL],
-    token: process.env[ENV_VARS.KV_REST_API_TOKEN],
-  });
-  logger.info('Redis client initialized successfully');
-} else {
-  logger.warn('Redis client not initialized - missing environment variables');
-}
-
-async function loadApiKeys(keySet, cache, cacheTimestamp, loadingPromise, setLoadingPromise) {
-  const now = Date.now();
-  
-  // Check if cache is still valid
-  if (cache.value !== CACHE.INITIAL_VALUE && (now - cacheTimestamp.value) < CACHE.DURATION) {
-    logger.debug(`Using cached keys for ${keySet}, cache age: ${now - cacheTimestamp.value}ms`);
-    return cache.value;
+class ApiKeyCache {
+  constructor(keySet, duration = CACHE.DURATION) {
+    this.keySet = keySet;
+    this.duration = duration;
+    this.cache = null;
+    this.timestamp = 0;
+    this.loadingPromise = null;
   }
 
-  // Check if another request is already loading
-  if (loadingPromise.value) {
-    logger.debug(`Waiting for another request to load ${keySet}`);
+  isValid() {
+    return this.cache !== null && (Date.now() - this.timestamp) < this.duration;
+  }
+
+  async load(redis) {
+    if (this.isValid()) {
+      logger.debug(`Using cached keys for ${this.keySet}, cache age: ${Date.now() - this.timestamp}ms`);
+      return this.cache;
+    }
+
+    if (this.loadingPromise) {
+      logger.debug(`Waiting for another request to load ${this.keySet}`);
+      try {
+        return await this.loadingPromise;
+      } catch (error) {
+        logger.warn(`Previous loading attempt failed for ${this.keySet}, retrying`);
+      }
+    }
+
+    this.loadingPromise = this._loadFromRedis(redis);
     try {
-      const result = await loadingPromise.value;
+      const result = await this.loadingPromise;
       return result;
-    } catch (error) {
-      // If the loading failed, we'll try again
-      logger.warn(`Previous loading attempt failed for ${keySet}, retrying`);
-    }
-  }
-
-  // Create a new loading promise
-  const loadPromise = (async () => {
-    try {
-      if (!redis) {
-        const error = "Redis client is not initialized";
-        logger.error(error);
-        throw new Error(error);
-      }
-
-      logger.info(`Loading API keys from Redis set: ${keySet}`);
-      const keys = await redis.smembers(keySet);
-      if (!keys || keys.length === 0) {
-        const error = `No API keys found in Redis set "${keySet}"`;
-        logger.error(error);
-        throw new Error(error);
-      }
-
-      logger.info(`Loaded ${keys.length} API keys from ${keySet}`);
-      cache.value = keys;
-      cacheTimestamp.value = Date.now();
-      return keys;
     } finally {
-      // Clear the loading promise after completion (success or failure)
-      setLoadingPromise(null);
-    }
-  })();
-
-  // Set the loading promise
-  setLoadingPromise(loadPromise);
-  
-  try {
-    const result = await loadPromise;
-    return result;
-  } catch (error) {
-    // Re-throw the error after the promise is cleared
-    throw error;
-  }
-}
-
-async function loadTranslateKeys() {
-  const cache = { value: cachedTranslateKeys };
-  const timestamp = { value: translateKeyCacheTimestamp };
-  const loadingPromise = { value: translateKeysLoadingPromise };
-  
-  const keys = await loadApiKeys(
-    REDIS_KEYS.TRANSLATE_KEY_SET, 
-    cache, 
-    timestamp,
-    loadingPromise,
-    (promise) => { translateKeysLoadingPromise = promise; }
-  );
-  
-  cachedTranslateKeys = cache.value;
-  translateKeyCacheTimestamp = timestamp.value;
-  return keys;
-}
-
-async function loadGeminiApiKeys() {
-  const cache = { value: cachedApiKeys };
-  const timestamp = { value: apiKeyCacheTimestamp };
-  const loadingPromise = { value: apiKeysLoadingPromise };
-  
-  const keys = await loadApiKeys(
-    REDIS_KEYS.GEMINI_API_KEY_SET, 
-    cache, 
-    timestamp,
-    loadingPromise,
-    (promise) => { apiKeysLoadingPromise = promise; }
-  );
-  
-  cachedApiKeys = cache.value;
-  apiKeyCacheTimestamp = timestamp.value;
-  return keys;
-}
-
-async function loadAuthSecrets() {
-  const now = Date.now();
-  
-  // Check if cache is still valid
-  if (cachedAuthSecrets !== CACHE.INITIAL_VALUE && (now - authSecretsCacheTimestamp) < CACHE.DURATION) {
-    logger.debug(`Using cached auth secrets, cache age: ${now - authSecretsCacheTimestamp}ms`);
-    return cachedAuthSecrets;
-  }
-
-  // Check if another request is already loading
-  if (authSecretsLoadingPromise) {
-    logger.debug('Waiting for another request to load auth secrets');
-    try {
-      const result = await authSecretsLoadingPromise;
-      return result;
-    } catch (error) {
-      logger.warn('Previous loading attempt failed for auth secrets, retrying');
+      this.loadingPromise = null;
     }
   }
 
-  // Create a new loading promise
-  authSecretsLoadingPromise = (async () => {
-    try {
-      if (!redis) {
-        logger.warn('Redis not available for loading auth secrets');
-        cachedAuthSecrets = [];
-        authSecretsCacheTimestamp = Date.now();
-        return [];
-      }
-
-      logger.info('Loading auth secrets from Redis');
-      const keys = await redis.smembers(REDIS_KEYS.AUTH_SECRET_SET);
-      
-      if (!keys) {
-        cachedAuthSecrets = [];
-      } else {
-        cachedAuthSecrets = keys;
-      }
-
-      logger.info(`Loaded ${cachedAuthSecrets?.length || 0} auth secrets`);
-      authSecretsCacheTimestamp = Date.now();
-      return cachedAuthSecrets;
-    } finally {
-      // Clear the loading promise after completion
-      authSecretsLoadingPromise = null;
+  async _loadFromRedis(redis) {
+    if (!redis) {
+      const error = "Redis client is not initialized";
+      logger.error(error);
+      throw new Error(error);
     }
-  })();
 
-  try {
-    const result = await authSecretsLoadingPromise;
-    return result;
-  } catch (error) {
-    // Re-throw the error after the promise is cleared
-    throw error;
+    logger.info(`Loading API keys from Redis set: ${this.keySet}`);
+    const keys = await redis.smembers(this.keySet);
+
+    if (!keys || keys.length === 0) {
+      const error = `No API keys found in Redis set "${this.keySet}"`;
+      logger.error(error);
+      throw new Error(error);
+    }
+
+    logger.info(`Loaded ${keys.length} API keys from ${this.keySet}`);
+    this.cache = keys;
+    this.timestamp = Date.now();
+    return keys;
+  }
+
+  invalidate() {
+    this.cache = null;
+    this.timestamp = 0;
+  }
+
+  removeKey(key) {
+    if (this.cache && Array.isArray(this.cache)) {
+      this.cache = this.cache.filter(k => k !== key);
+    }
   }
 }
 
-export async function getNextTranslateKey() {
-  const translateKeys = await loadTranslateKeys();
-
-  if (!translateKeys || translateKeys.length === 0) {
-    const error = 'No Translate API keys available';
-    logger.error(error);
-    throw new Error(error);
+class ApiKeyManager {
+  constructor() {
+    this.redis = this._initRedis();
+    this.caches = {
+      gemini: new ApiKeyCache(REDIS_KEYS.GEMINI_API_KEY_SET),
+      translate: new ApiKeyCache(REDIS_KEYS.TRANSLATE_KEY_SET),
+      auth: new ApiKeyCache(REDIS_KEYS.AUTH_SECRET_SET, CACHE.DURATION * 2)
+    };
+    this.counters = new Map();
+    this.counterSyncInterval = 100;
   }
 
-  const counter = await redis.incr(REDIS_KEYS.TRANSLATE_KEY_INDEX);
-  const index = (counter - 1) % translateKeys.length;
-  logger.debug(`Selected Translate API key at index ${index}`);
-  return translateKeys[index];
-}
-
-export async function getNextGeminiApiKey() {
-  const apiKeys = await loadGeminiApiKeys();
-
-  if (!apiKeys || apiKeys.length === 0) {
-    const error = 'No Gemini API keys available';
-    logger.error(error);
-    throw new Error(error);
+  _initRedis() {
+    if (process.env[ENV_VARS.KV_REST_API_URL] && process.env[ENV_VARS.KV_REST_API_TOKEN]) {
+      const redis = new Redis({
+        url: process.env[ENV_VARS.KV_REST_API_URL],
+        token: process.env[ENV_VARS.KV_REST_API_TOKEN],
+      });
+      logger.info('Redis client initialized successfully');
+      return redis;
+    }
+    logger.warn('Redis client not initialized - missing environment variables');
+    return null;
   }
 
-  const counter = await redis.incr(REDIS_KEYS.GEMINI_API_KEY_INDEX);
-  const index = (counter - 1) % apiKeys.length;
-  logger.debug(`Selected Gemini API key at index ${index}`);
-  return apiKeys[index];
-}
+  async getNextKey(type, indexKey) {
+    const cache = this.caches[type];
+    if (!cache) {
+      throw new Error(`Unknown key type: ${type}`);
+    }
 
-export async function validateClientKey(authKey) {
-  const startTime = Date.now();
+    const keys = await cache.load(this.redis);
 
-  // First check cache
-  const authSecrets = await loadAuthSecrets();
-  if (authSecrets && authSecrets.includes(authKey)) {
-    logger.debug(`Auth key ${authKey.slice(0, API_KEY_LOG_LENGTH)}... validated from cache (${Date.now() - startTime}ms)`);
-    return true;
-  }
+    let counter = this.counters.get(indexKey) || 0;
+    counter = (counter + 1) % keys.length;
+    this.counters.set(indexKey, counter);
 
-  // If not in cache, check Redis
-  if (redis) {
-    const isMember = await redis.sismember(REDIS_KEYS.AUTH_SECRET_SET, authKey);
-    if (isMember) {
-      // Update cache with proper locking
-      if (cachedAuthSecrets !== CACHE.INITIAL_VALUE) {
-        // Only update if cache is already initialized
-        if (!cachedAuthSecrets.includes(authKey)) {
-          cachedAuthSecrets = [...cachedAuthSecrets, authKey];
-          logger.info(`Auth key ${authKey.slice(0, API_KEY_LOG_LENGTH)}... added to cache (${Date.now() - startTime}ms)`);
+    if (counter % this.counterSyncInterval === 0) {
+      Promise.resolve().then(async () => {
+        try {
+          await this.redis.set(indexKey, counter);
+        } catch (error) {
+          logger.warn(`Failed to sync counter ${indexKey}: ${error.message}`);
         }
+      });
+    }
+
+    const selectedKey = keys[counter];
+    logger.debug(`Selected ${type} API key at index ${counter}`);
+    return selectedKey;
+  }
+
+  async getNextGeminiApiKey() {
+    return this.getNextKey('gemini', REDIS_KEYS.GEMINI_API_KEY_INDEX);
+  }
+
+  async getNextTranslateKey() {
+    return this.getNextKey('translate', REDIS_KEYS.TRANSLATE_KEY_INDEX);
+  }
+
+  async validateClientKey(authKey) {
+    const startTime = Date.now();
+
+    // First check cache
+    const authCache = this.caches.auth;
+    try {
+      const authSecrets = await authCache.load(this.redis);
+      if (authSecrets && authSecrets.includes(authKey)) {
+        logger.debug(`Auth key ${authKey.slice(0, API_KEY_LOG_LENGTH)}... validated from cache (${Date.now() - startTime}ms)`);
+        return true;
       }
-      return true;
+    } catch (error) {
+      // If cache fails, continue to check Redis directly
+      logger.warn(`Auth cache load failed: ${error.message}`);
+    }
+
+    // If not in cache, check Redis directly
+    if (this.redis) {
+      try {
+        const isMember = await this.redis.sismember(REDIS_KEYS.AUTH_SECRET_SET, authKey);
+        if (isMember) {
+          // Update cache
+          if (authCache.cache && Array.isArray(authCache.cache)) {
+            if (!authCache.cache.includes(authKey)) {
+              authCache.cache.push(authKey);
+              logger.info(`Auth key ${authKey.slice(0, API_KEY_LOG_LENGTH)}... added to cache`);
+            }
+          }
+          return true;
+        }
+      } catch (error) {
+        logger.error(`Redis auth check failed: ${error.message}`);
+      }
+    }
+
+    logger.warn(`Auth key ${authKey.slice(0, API_KEY_LOG_LENGTH)}... validation failed (${Date.now() - startTime}ms)`);
+    return false;
+  }
+
+  async removeApiKey(keyToRemove, type) {
+    const cache = this.caches[type];
+    if (!cache) {
+      logger.warn(`Unknown key type: ${type}`);
+      return;
+    }
+
+    // Remove from cache
+    cache.removeKey(keyToRemove);
+    logger.info(`Removed API key ${keyToRemove.slice(0, API_KEY_LOG_LENGTH)}... from ${type} cache`);
+
+    // Remove from Redis
+    if (this.redis) {
+      try {
+        const keySet = type === 'gemini' ? REDIS_KEYS.GEMINI_API_KEY_SET : REDIS_KEYS.TRANSLATE_KEY_SET;
+        await this.redis.srem(keySet, keyToRemove);
+        logger.info(`Removed API key from Redis set ${keySet}`);
+      } catch (error) {
+        logger.error(`Failed to remove API key from Redis: ${error.message}`);
+      }
     }
   }
 
-  // Default deny: return false if Redis unavailable or key doesn't exist
-  logger.warn(`Auth key ${authKey.slice(0, API_KEY_LOG_LENGTH)}... validation failed (${Date.now() - startTime}ms)`);
-  return false;
-}
-
-export async function removeApiKey(keyToRemove, keySet) {
-  if (!redis) {
-    logger.warn("Redis client not initialized. Cannot remove API key.");
-    return;
+  async removeGeminiApiKey(keyToRemove) {
+    return this.removeApiKey(keyToRemove, 'gemini');
   }
 
-  // Invalidate cache to force reload on next request
-  if (keySet === REDIS_KEYS.GEMINI_API_KEY_SET) {
-    if (cachedApiKeys !== CACHE.INITIAL_VALUE) {
-      const index = cachedApiKeys.indexOf(keyToRemove);
-      if (index > -1) {
-        cachedApiKeys = cachedApiKeys.filter(key => key !== keyToRemove);
-        logger.info(`Removed API key ${keyToRemove.slice(0, API_KEY_LOG_LENGTH)}... from Gemini cache`);
-      }
-    }
-  } else if (keySet === REDIS_KEYS.TRANSLATE_KEY_SET) {
-    if (cachedTranslateKeys !== CACHE.INITIAL_VALUE) {
-      const index = cachedTranslateKeys.indexOf(keyToRemove);
-      if (index > -1) {
-        cachedTranslateKeys = cachedTranslateKeys.filter(key => key !== keyToRemove);
-        logger.info(`Removed API key ${keyToRemove.slice(0, API_KEY_LOG_LENGTH)}... from Translate cache`);
-      }
-    }
+  async removeTranslateKey(keyToRemove) {
+    return this.removeApiKey(keyToRemove, 'translate');
   }
 
-  try {
-    await redis.srem(keySet, keyToRemove);
-    logger.info(`Removed API key ${keyToRemove.slice(0, API_KEY_LOG_LENGTH)}... from Redis set ${keySet}`);
-  } catch (error) {
-    logger.error(`Failed to remove API key ${keyToRemove.slice(0, API_KEY_LOG_LENGTH)}... from Redis set ${keySet}:`, error.message);
+  clearAllCaches() {
+    Object.values(this.caches).forEach(cache => cache.invalidate());
+    this.counters.clear();
+    logger.info('All caches cleared');
   }
 }
 
-export async function removeTranslateKey(keyToRemove) {
-  return removeApiKey(keyToRemove, REDIS_KEYS.TRANSLATE_KEY_SET);
-}
+// Singleton instance
+const apiKeyManager = new ApiKeyManager();
 
-export async function removeGeminiApiKey(keyToRemove) {
-  return removeApiKey(keyToRemove, REDIS_KEYS.GEMINI_API_KEY_SET);
-}
-
-// Export function to clear all caches (useful for testing or manual refresh)
-export function clearAllCaches() {
-  cachedApiKeys = CACHE.INITIAL_VALUE;
-  cachedTranslateKeys = CACHE.INITIAL_VALUE;
-  cachedAuthSecrets = CACHE.INITIAL_VALUE;
-  apiKeyCacheTimestamp = CACHE.INITIAL_TIMESTAMP;
-  translateKeyCacheTimestamp = CACHE.INITIAL_TIMESTAMP;
-  authSecretsCacheTimestamp = CACHE.INITIAL_TIMESTAMP;
-  apiKeysLoadingPromise = null;
-  translateKeysLoadingPromise = null;
-  authSecretsLoadingPromise = null;
-  logger.info('All caches cleared');
-}
+export const getNextGeminiApiKey = () => apiKeyManager.getNextGeminiApiKey();
+export const getNextTranslateKey = () => apiKeyManager.getNextTranslateKey();
+export const validateClientKey = (authKey) => apiKeyManager.validateClientKey(authKey);
+export const removeGeminiApiKey = (key) => apiKeyManager.removeGeminiApiKey(key);
+export const removeTranslateKey = (key) => apiKeyManager.removeTranslateKey(key);
+export const clearAllCaches = () => apiKeyManager.clearAllCaches();

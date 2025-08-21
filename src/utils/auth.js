@@ -32,9 +32,11 @@ export function extractAuthKey(request) {
     // 3. Check Authorization header
     const authHeader = request.headers.get(HEADERS.AUTHORIZATION);
     if (authHeader) {
-        const key = authHeader.replace(BEARER_PREFIX_REGEX, '');
-        logger.debug(`Auth key extracted from Authorization header`);
-        return key.trim();
+        const key = authHeader.replace(BEARER_PREFIX_REGEX, '').trim();
+        if (key) {
+            logger.debug(`Auth key extracted from Authorization header`);
+            return key;
+        }
     }
 
     logger.debug('No authentication key found in request');

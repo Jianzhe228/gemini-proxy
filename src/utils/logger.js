@@ -1,11 +1,11 @@
-import { LOG_LEVEL} from '../core/constants.js';
+import { LOG_LEVEL, LOG_PERFORMANCE_METRICS } from '../core/constants.js';
 
 const LOG_LEVELS = {
-    none: -1,   // No log output
-    error: 0,   // Only output errors
-    warn: 1,    // Output warnings and errors
-    info: 2,    // Output info, warnings and errors
-    debug: 3    // Output all logs
+    none: -1,
+    error: 0,
+    warn: 1,
+    info: 2,
+    debug: 3
 };
 
 export class Logger {
@@ -16,7 +16,6 @@ export class Logger {
     }
 
     shouldLog(level) {
-        // If set to none, don't output any logs
         if (this.minLevel === LOG_LEVELS.none) {
             return false;
         }
@@ -24,6 +23,11 @@ export class Logger {
     }
 
     formatMessage(level, message) {
+        // Only format if we're going to log
+        if (!this.shouldLog(level)) {
+            return null;
+        }
+
         const timestamp = new Date().toISOString();
         const prefix = this.context ? `[${this.context}]` : '';
         const levelStr = level.toUpperCase().padEnd(5);
@@ -31,13 +35,11 @@ export class Logger {
     }
 
     log(level, message, ...args) {
-        if (!this.shouldLog(level)) {
+        const formattedMessage = this.formatMessage(level, message);
+        if (!formattedMessage) {
             return;
         }
 
-        const formattedMessage = this.formatMessage(level, message);
-
-        // Use different console methods based on log level
         switch (level) {
             case 'error':
                 console.error(formattedMessage, ...args);
@@ -72,7 +74,7 @@ export class Logger {
     }
 
     logRequestTime(requestId, pathname, method, startTime) {
-        if (this.minLevel === LOG_LEVELS.none) {
+        if (!LOG_PERFORMANCE_METRICS || this.minLevel === LOG_LEVELS.none) {
             return;
         }
 
@@ -81,7 +83,6 @@ export class Logger {
         this[level](`Request ${requestId} | ${method} ${pathname} | Duration: ${duration}ms`);
     }
 
-    // Dynamically change log level (optional feature)
     setLogLevel(level) {
         const newLevel = level.toLowerCase();
         if (LOG_LEVELS.hasOwnProperty(newLevel)) {
@@ -93,36 +94,7 @@ export class Logger {
         }
     }
 
-    // Get current log level
     getLogLevel() {
         return this.currentLevel;
-    }
-}
-
-// Create a global log manager (optional)
-export class LogManager {
-    static loggers = new Map();
-    static globalLevel = LOG_LEVEL.toLowerCase();
-
-    static getLogger(context) {
-        if (!this.loggers.has(context)) {
-            this.loggers.set(context, new Logger(context));
-        }
-        return this.loggers.get(context);
-    }
-
-    static setGlobalLogLevel(level) {
-        const newLevel = level.toLowerCase();
-        if (LOG_LEVELS.hasOwnProperty(newLevel)) {
-            this.globalLevel = newLevel;
-            // Update all existing loggers
-            this.loggers.forEach(logger => {
-                logger.setLogLevel(newLevel);
-            });
-        }
-    }
-
-    static clearLoggers() {
-        this.loggers.clear();
     }
 }

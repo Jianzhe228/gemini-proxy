@@ -14,12 +14,13 @@ const logger = new Logger('ProxyService');
 
 export async function proxyToGoogle(request) {
     const startTime = Date.now();
+    const requestId = request.requestId || 'unknown';
 
     try {
         const url = new URL(request.url);
         const targetUrl = `${GEMINI_BASE_URL}${url.pathname}${url.search}`;
 
-        logger.info(`Proxying request to: ${targetUrl}`);
+        logger.info(`[${requestId}] Proxying request to: ${targetUrl}`);
 
         // Prepare headers
         const headers = new Headers();
@@ -32,7 +33,7 @@ export async function proxyToGoogle(request) {
         let requestBody = null;
         if (request.method !== HTTP_METHOD.GET && request.method !== HTTP_METHOD.HEAD) {
             requestBody = await request.arrayBuffer();
-            logger.debug(`Request body size: ${requestBody.byteLength} bytes`);
+            logger.debug(`[${requestId}] Request body size: ${requestBody.byteLength} bytes`);
         }
 
         // Use fetchWithRetry for resilient API calls
@@ -50,7 +51,8 @@ export async function proxyToGoogle(request) {
                     }
                 };
             },
-            validateResponse: validateJsonResponse
+            validateResponse: validateJsonResponse,
+            requestId: requestId
         });
 
         if (!response) {
@@ -64,17 +66,26 @@ export async function proxyToGoogle(request) {
             responseHeaders.set(HEADERS.CONTENT_TYPE.toLowerCase(), responseContentType);
         }
 
-        logger.info(`Proxy request completed in ${Date.now() - startTime}ms with status ${response.status}`);
+        // Add request ID to response
+        responseHeaders.set(HEADERS.X_REQUEST_ID, requestId);
+
+        logger.info(`[${requestId}] Proxy request completed in ${Date.now() - startTime}ms with status ${response.status}`);
 
         return new Response(response.body, {
             status: response.status,
             headers: responseHeaders
         });
     } catch (error) {
-        logger.error(`Proxy handler error after ${Date.now() - startTime}ms:`, error.message);
-        return new Response(JSON.stringify({ error: ERROR_MESSAGES.INTERNAL }), {
+        logger.error(`[${requestId}] Proxy handler error after ${Date.now() - startTime}ms:`, error.message);
+        return new Response(JSON.stringify({
+            error: ERROR_MESSAGES.INTERNAL,
+            requestId: requestId
+        }), {
             status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
-            headers: { [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON }
+            headers: {
+                [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON,
+                [HEADERS.X_REQUEST_ID]: requestId
+            }
         });
     }
 }
