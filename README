@@ -1,0 +1,46 @@
+vercel环境配置：
+# 必填
+KV_REST_API_URL=xxx
+KV_REST_API_TOKEN=xxx
+
+# 可选
+MAX_RETRIES=20                                            默认20次重试
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com 基础URL,一般不需要修改
+GEMINI_API_VERSION=v1beta                                 API版本,一般不需要修改
+GEMINI_MODEL=gemini-2.5-flash                             默认gemini-2.5-flash模型，可根据需要修改
+LOG_LEVEL=info                                            日志级别,可选值: none, error, warn, info, debug, 可根据需要修改
+CACHE_DURATION_SECONDS=600                                本地缓存持续时间,默认10分钟，一般不需要修改
+REQUEST_TIMEOUT_MS=20000                                  请求超时时间,默认20秒,一般不需要修改
+PARALLEL_TRANSLATION_LIMIT=10                             并行翻译限制,默认10个，一般不需要修改
+TRANSLATION_SYSTEM_INSTRUCTION="Your custom instruction..." 翻译系统指令,默认值为"Your custom instruction..."，一般不需要修改
+
+
+redis配置：
+AUTH_SECRET_SET 相当于原来的key,set集合,一行一个key
+GEMINI_API_KEY_SET gemini api key , set集合,一行一个key,建议使用自己的key,稳定
+GEMINI_API_KEY_INDEX 用于轮询API密钥，string,默认设置为0其实即可
+TRANSLATE_KEY_SET 翻译key, set集合, 一行一个key，可以使用免费的key
+TRANSLATE_KEY_INDEX translate key的索引, string, 默认设置为0即可
+
+
+helper脚本使用方式
+将要添加的authKey添加到 txt/add_auths.txt，一行一个
+将要删除的authkey添加到 txt/delete_auths.txt，一行一个
+将要添加的api key添加到 txt/add_keys.txt，一行一个
+将要删除的api key添加到 txt/delete_keys.txt，一行一个
+txt/allkeys.txt 是可以存放未筛选的api key，可以通过选项6️⃣去重，然后使用选项七测试是否有效
+选项七（会拉取redis的全部api key，对redis的key和allkeys.txt中的key全部测试）能够将有效的key添加到txt/add_keys.txt中，能够将无效的key添加到txt/delete_keys.txt中
+并将全部有效的api key备份到txt/backup_keys.txt中
+
+使用方式 gemini 格式：
+cherry studio:
+密钥：AUTH_SECRET_SET其中一个
+API地址：https://自定义域名
+
+沉浸式翻译：（创建一个自定义接口，可能需要打开beta模式）
+https://自定义域名/translate/AUTH_SECRET_SET其中一个
+支持的语言代码：auto,zh-CN,en
+
+roo code:
+自定义基础URL: https://自定义域名
+GEMINI API 密钥：AUTH_SECRET_SET其中一个

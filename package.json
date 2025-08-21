@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@vercel/edge-config": "^1.4.0",
+    "@upstash/redis": "^1.31.5"
+  }
+}
