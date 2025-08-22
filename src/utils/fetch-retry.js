@@ -1,6 +1,6 @@
-import { 
-    MAX_RETRIES, 
-    HTTP_STATUS, 
+import {
+    MAX_RETRIES,
+    HTTP_STATUS,
     API_KEY_LOG_LENGTH,
     HEADERS,
     CONTENT_TYPE
@@ -41,7 +41,7 @@ export async function fetchWithRetry(options) {
     for (let i = 0; i < maxRetries; i++) {
         try {
             const selectedKey = await getApiKey();
-            
+
             // Avoid using the same key twice in the same retry session
             if (usedKeys.has(selectedKey)) {
                 logger.debug(`[${requestId}] Skipping already tried key ${selectedKey.slice(0, API_KEY_LOG_LENGTH)}...`);
@@ -50,16 +50,16 @@ export async function fetchWithRetry(options) {
             usedKeys.add(selectedKey);
 
             const { url, requestOptions } = await buildRequest(selectedKey);
-            
+
             // Check circuit breaker
             const circuitBreaker = getCircuitBreaker(url);
-            
+
             logger.debug(`[${requestId}] Attempt ${i + 1}/${maxRetries} with key ${selectedKey.slice(0, API_KEY_LOG_LENGTH)}...`);
 
             const response = await circuitBreaker.execute(async () => {
                 return await fetch(url, requestOptions);
             });
-            
+
             lastResponse = response;
 
             // Handle specific status codes
@@ -84,16 +84,16 @@ export async function fetchWithRetry(options) {
             }
 
             logger.warn(`[${requestId}] API key ${selectedKey.slice(0, API_KEY_LOG_LENGTH)}... received status ${response.status}. Retry ${i + 1}/${maxRetries}`);
-            
+
             // Exponential backoff for server errors
             if (response.status >= 500) {
                 const delay = Math.min(100 * Math.pow(2, i), 5000);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
-            
+
         } catch (error) {
             logger.error(`[${requestId}] Error during retry ${i + 1}/${maxRetries}:`, error.message);
-            
+
             // Exponential backoff for network errors
             if (i < maxRetries - 1) {
                 const delay = Math.min(100 * Math.pow(2, i), 5000);
@@ -113,7 +113,7 @@ export async function fetchWithRetry(options) {
 
 export async function validateJsonResponse(response) {
     if (!response.ok) return false;
-    
+
     const contentType = response.headers.get(HEADERS.CONTENT_TYPE.toLowerCase());
     if (contentType && contentType.includes(CONTENT_TYPE.JSON)) {
         try {
@@ -126,6 +126,6 @@ export async function validateJsonResponse(response) {
             return false;
         }
     }
-    
+
     return response.body !== null;
 }

@@ -28,12 +28,12 @@ async function generateRequestKey(request) {
     const url = new URL(request.url);
     const method = request.method;
     const pathname = url.pathname;
-    
+
     // For GET/HEAD requests, use URL as key
     if (method === 'GET' || method === 'HEAD') {
         return `${method}:${url.href}`;
     }
-    
+
     // For POST requests, include body hash
     if (method === 'POST' && request.body) {
         try {
@@ -48,7 +48,7 @@ async function generateRequestKey(request) {
             logger.warn('Failed to generate request key:', error.message);
         }
     }
-    
+
     return `${method}:${pathname}:${Date.now()}`;
 }
 
@@ -95,13 +95,13 @@ async function processRequest(request, requestId, startTime) {
                     requestId: requestId
                 }), {
                     status: HTTP_STATUS.UNAUTHORIZED,
-                    headers: { 
+                    headers: {
                         [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON,
                         [HEADERS.X_REQUEST_ID]: requestId
                     }
                 });
             }
-            
+
             logger.debug(`[${requestId}] Routing to Google proxy`);
             const response = await proxyToGoogle(request);
             logger.logRequestTime(requestId, pathname, method, startTime);
@@ -110,16 +110,16 @@ async function processRequest(request, requestId, startTime) {
 
         // Route to appropriate handler
         const response = await router.route(request);
-        
+
         // Add request ID to response headers
         const headers = new Headers(response.headers);
         headers.set(HEADERS.X_REQUEST_ID, requestId);
-        
+
         const finalResponse = new Response(response.body, {
             status: response.status,
             headers: headers
         });
-        
+
         logger.logRequestTime(requestId, pathname, method, startTime);
         logger.info(`[${requestId}] Response status: ${response.status}`);
         return finalResponse;
@@ -131,7 +131,7 @@ async function processRequest(request, requestId, startTime) {
             requestId: requestId
         }), {
             status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
-            headers: { 
+            headers: {
                 [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON,
                 [HEADERS.X_REQUEST_ID]: requestId
             }
@@ -144,10 +144,10 @@ async function processRequest(request, requestId, startTime) {
 export async function handleRequest(request) {
     const requestId = generateRequestId();
     const startTime = Date.now();
-    
+
     // Generate request key for deduplication
     const requestKey = await generateRequestKey(request);
-    
+
     // Check if identical request is already being processed
     if (pendingRequests.has(requestKey)) {
         logger.debug(`[${requestId}] Deduplicating request`);
@@ -158,7 +158,7 @@ export async function handleRequest(request) {
     // Process new request
     const responsePromise = processRequest(request, requestId, startTime);
     pendingRequests.set(requestKey, responsePromise);
-    
+
     try {
         const response = await responsePromise;
         return response;

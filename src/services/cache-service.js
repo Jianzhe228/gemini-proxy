@@ -26,14 +26,14 @@ class CacheService {
 
     async generateCacheKey(text, sourceLang, targetLang) {
         const cacheIdentifier = `${text}|${sourceLang || 'auto'}|${targetLang}`;
-        
+
         // Check local cache
         if (this.keyCache.has(cacheIdentifier)) {
             return this.keyCache.get(cacheIdentifier);
         }
 
         let key;
-        
+
         // For short texts, use direct encoding
         if (cacheIdentifier.length < 100) {
             const encoder = new TextEncoder();
@@ -58,7 +58,7 @@ class CacheService {
             const firstKey = this.keyCache.keys().next().value;
             this.keyCache.delete(firstKey);
         }
-        
+
         this.keyCache.set(cacheIdentifier, key);
         return key;
     }
@@ -103,20 +103,20 @@ class CacheService {
         if (!this.redis) return new Map();
 
         const results = new Map();
-        
+
         try {
             // Generate all keys
-            const keyPromises = texts.map(text => 
+            const keyPromises = texts.map(text =>
                 this.generateCacheKey(text, sourceLang, targetLang)
                     .then(key => ({ text, key }))
             );
-            
+
             const keys = await Promise.all(keyPromises);
             const keyArray = keys.map(k => k.key);
-            
+
             // Use mget for batch retrieval
             const values = await this.redis.mget(...keyArray);
-            
+
             keys.forEach(({ text }, index) => {
                 const value = values[index];
                 if (value) {
@@ -129,7 +129,7 @@ class CacheService {
                     }
                 }
             });
-            
+
             logger.info(`Cache hits: ${results.size}/${texts.length}`);
         } catch (error) {
             logger.error('Error getting multiple cached translations:', error.message);
@@ -143,12 +143,12 @@ class CacheService {
 
         try {
             const pipeline = this.redis.pipeline();
-            
+
             for (const { text, translation } of translations) {
                 const key = await this.generateCacheKey(text, sourceLang, targetLang);
                 pipeline.set(key, JSON.stringify(translation), { ex: CACHE.TRANSLATION_TTL });
             }
-            
+
             await pipeline.exec();
             logger.debug(`Cached ${translations.length} translations`);
         } catch (error) {
