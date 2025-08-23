@@ -117,3 +117,21 @@ export const PERFORMANCE = {
     BATCH_DELAY: getIntFromEnv('BATCH_DELAY_MS', 50),
     REQUEST_DEDUP_TTL: getIntFromEnv('REQUEST_DEDUP_TTL_MS', 100)
 };
+
+// Provider configuration
+export const PROVIDERS = {
+    GEMINI: {
+        NAME: 'gemini',
+        BASE_URL: GEMINI_BASE_URL,
+        API_VERSION: GEMINI_API_VERSION,
+        DEFAULT_MODEL: GEMINI_MODEL,
+        RATE_LIMIT: 60, // requests per minute
+        TIMEOUT: PERFORMANCE.REQUEST_TIMEOUT
+    }
+};
+
+// Provider route patterns
+export const PROVIDER_ROUTES = {
+    BASE: '/providers',
+    GEMINI: '/providers/gemini'
+};

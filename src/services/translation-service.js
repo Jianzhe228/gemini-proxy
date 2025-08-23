@@ -1,20 +1,16 @@
-import { getNextTranslateKey, removeTranslateKey, validateClientKey } from '../core/api-key-manager.js';
-import { fetchWithRetry } from '../utils/fetch-retry.js';
+import { validateClientKey } from '../core/api-key-manager.js';
+import { providerManager } from '../core/provider-manager.js';
 import { cacheService } from './cache-service.js';
 import { Semaphore } from '../utils/semaphore.js';
 import { Logger } from '../utils/logger.js';
 import {
-    GEMINI_BASE_URL,
-    GEMINI_API_VERSION,
-    GEMINI_MODEL,
-    GEMINI_GENERATE_CONTENT_ENDPOINT,
     HTTP_STATUS,
-    HTTP_METHOD,
     CONTENT_TYPE,
     HEADERS,
     ERROR_MESSAGES,
     TRANSLATION_SYSTEM_INSTRUCTION,
-    PERFORMANCE
+    PERFORMANCE,
+    PROVIDERS
 } from '../core/constants.js';
 
 const logger = new Logger('TranslationService');
@@ -49,69 +45,44 @@ class TranslationService {
             ? `Translate from ${sourceLang} to ${targetLang}: "${text}"`
             : `Translate to ${targetLang}: "${text}"`;
 
-        const geminiBody = {
-            contents: [{ parts: [{ text: prompt }] }],
-            system_instruction: {
-                parts: [{ text: TRANSLATION_SYSTEM_INSTRUCTION }]
-            }
-        };
+        try {
+            // Use provider manager to call Gemini provider with translation keys
+            const geminiResponse = await providerManager.routeRequest(
+                PROVIDERS.GEMINI.NAME,
+                'generateContent',
+                {
+                    prompt,
+                    systemInstruction: TRANSLATION_SYSTEM_INSTRUCTION,
+                    model: PROVIDERS.GEMINI.DEFAULT_MODEL,
+                    useTranslationKeys: true
+                }
+            );
 
-        const response = await fetchWithRetry({
-            getApiKey: getNextTranslateKey,
-            removeApiKey: removeTranslateKey,
-            buildRequest: (selectedKey) => {
-                const geminiUrl = `${GEMINI_BASE_URL}/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:${GEMINI_GENERATE_CONTENT_ENDPOINT}`;
-                return {
-                    url: `${geminiUrl}?key=${selectedKey}`,
-                    requestOptions: {
-                        method: HTTP_METHOD.POST,
-                        headers: { [HEADERS.CONTENT_TYPE]: CONTENT_TYPE.JSON },
-                        body: JSON.stringify(geminiBody),
-                        signal: AbortSignal.timeout(PERFORMANCE.REQUEST_TIMEOUT)
-                    }
+            const textFromApi = geminiResponse.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (textFromApi) {
+                const result = {
+                    detected_source_lang: sourceLang || 'auto',
+                    text: textFromApi.trim()
                 };
-            },
-            validateResponse: async (response) => {
-                if (!response.ok) return false;
-                try {
-                    const geminiData = await response.json();
-                    const textFromApi = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-                    return !!textFromApi;
-                } catch (e) {
-                    return false;
-                }
+
+                // Cache the successful translation asynchronously
+                scheduleAsync(() => {
+                    cacheService.set(text, sourceLang, targetLang, result)
+                        .catch(err => logger.warn('Failed to cache translation:', err.message));
+                });
+
+                logger.debug(`Translation completed in ${Date.now() - startTime}ms`);
+                return result;
+            } else {
+                throw new Error('No translation text in response');
             }
-        });
-
-        if (response && response.ok) {
-            try {
-                const geminiData = await response.json();
-                const textFromApi = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (textFromApi) {
-                    const result = {
-                        detected_source_lang: sourceLang || 'auto',
-                        text: textFromApi.trim()
-                    };
-
-                    // Cache the successful translation asynchronously
-                    scheduleAsync(() => {
-                        cacheService.set(text, sourceLang, targetLang, result)
-                            .catch(err => logger.warn('Failed to cache translation:', err.message));
-                    });
-
-                    logger.debug(`Translation completed in ${Date.now() - startTime}ms`);
-                    return result;
-                }
-            } catch (e) {
-                logger.error('Failed to parse translation response:', e.message);
-            }
+        } catch (error) {
+            logger.error(`Translation failed after ${Date.now() - startTime}ms:`, error.message);
+            return {
+                detected_source_lang: sourceLang || 'unknown',
+                text: text // Return original text on failure
+            };
         }
-
-        logger.error(`Translation failed after ${Date.now() - startTime}ms. Status: ${response?.status || 'unknown'}`);
-        return {
-            detected_source_lang: sourceLang || 'unknown',
-            text: text // Return original text on failure
-        };
     }
 
     async translateWithSemaphore(text, targetLang, sourceLang) {
